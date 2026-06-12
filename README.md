@@ -220,9 +220,8 @@ jupyter notebook "Player_Churn_Prediction___Retention_Analytics.ipynb"
 
 ## 📬 Contact
 
-**[Your Name]** · Data Analyst  
-[your.email@example.com](mailto:your.email@example.com) · [LinkedIn](https://linkedin.com/in/your-profile) · [Portfolio](https://your-portfolio.com)
-
+**[Isfaque Ansari]** · Data Analyst  
+[isfaqueans6@gmail.com](mailto:your.email@example.com) · [LinkedIn](https://linkedin.com/in/isfaque-ansari-/) 
 ---
 
 <div align="center">
