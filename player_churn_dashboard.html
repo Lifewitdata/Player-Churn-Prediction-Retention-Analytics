@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Player Churn & Retention Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 24px; color: #1a1a1a; background: #ffffff; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 24px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 32px 0 12px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .kpi-card { background: #f5f5f4; border-radius: 8px; padding: 16px; }
+  .kpi-label { font-size: 13px; color: #666; margin: 0 0 4px; }
+  .kpi-value { font-size: 24px; font-weight: 600; margin: 0; }
+  .chart-wrap { position: relative; width: 100%; height: 240px; margin-bottom: 32px; }
+  .chart-wrap-sm { position: relative; width: 100%; height: 220px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; padding: 6px 8px; color: #666; font-weight: 600; border-bottom: 1px solid #ddd; }
+  td { padding: 6px 8px; border-top: 1px solid #eee; }
+  .cohort-table { font-size: 11px; }
+  .cohort-table th, .cohort-table td { text-align: center; padding: 4px 8px; }
+  .cohort-table th:first-child, .cohort-table td:first-child { text-align: left; }
+  select { padding: 6px 12px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; }
+  .footer-note { font-size: 12px; color: #999; margin-top: 8px; }
+  .table-wrap { overflow-x: auto; }
+  @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Player Churn & Retention Analytics Dashboard</h1>
+<p class="subtitle">Operator-level KPIs, GGR/MAU trends, churn segmentation, cohort retention, and model-based churn risk scores</p>
+
+<div class="kpi-grid">
+  <div class="kpi-card"><p class="kpi-label">Total operators</p><p class="kpi-value" id="kpi-total">-</p></div>
+  <div class="kpi-card"><p class="kpi-label">Active</p><p class="kpi-value" id="kpi-active">-</p></div>
+  <div class="kpi-card"><p class="kpi-label">Churned</p><p class="kpi-value" id="kpi-churned">-</p></div>
+  <div class="kpi-card"><p class="kpi-label">Churn rate</p><p class="kpi-value" id="kpi-rate">-</p></div>
+</div>
+
+<h3>Platform GGR trend (USD millions)</h3>
+<div class="chart-wrap"><canvas id="ggrChart"></canvas></div>
+
+<h3>Monthly active users (MAU)</h3>
+<div class="chart-wrap"><canvas id="mauChart"></canvas></div>
+
+<div class="two-col">
+  <div>
+    <h3>Churn rate by plan tier</h3>
+    <div class="chart-wrap-sm"><canvas id="tierChart"></canvas></div>
+  </div>
+  <div>
+    <h3>Top churn drivers</h3>
+    <div class="chart-wrap-sm"><canvas id="featChart"></canvas></div>
+  </div>
+</div>
+
+<h3>Churn rate by country</h3>
+<div class="chart-wrap" style="height:280px;"><canvas id="countryChart"></canvas></div>
+
+<h3>Cohort retention by quarter joined</h3>
+<div class="table-wrap" style="margin-bottom:32px;">
+  <table class="cohort-table" id="cohortTable"></table>
+</div>
+
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+  <h3 style="margin:0;">Operator churn risk (model scores)</h3>
+  <select id="filterSelect">
+    <option value="all">All operators</option>
+    <option value="high">High risk (&gt;=0.5)</option>
+    <option value="churned">Already churned</option>
+    <option value="active">Still active</option>
+  </select>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Operator</th><th>Country</th><th>Tier</th><th style="text-align:right;">Status</th><th style="text-align:right;">Risk score</th></tr>
+    </thead>
+    <tbody id="riskTbody"></tbody>
+  </table>
+</div>
+<p class="footer-note">Risk score = predicted churn probability from random forest model (80% cross-validated accuracy). Showing top 30 of 80 operators by risk score.</p>
+
+<script>
+const data = {"kpis": {"total_operators": 80, "active": 64, "churned": 16, "churn_rate": 20.0}, "ggr_trend": [{"month": "2023-01", "total_ggr_usd": 3.71}, {"month": "2023-02", "total_ggr_usd": 4.79}, {"month": "2023-03", "total_ggr_usd": 5.69}, {"month": "2023-04", "total_ggr_usd": 6.48}, {"month": "2023-05", "total_ggr_usd": 6.55}, {"month": "2023-06", "total_ggr_usd": 6.67}, {"month": "2023-07", "total_ggr_usd": 6.82}, {"month": "2023-08", "total_ggr_usd": 7.12}, {"month": "2023-09", "total_ggr_usd": 7.34}, {"month": "2023-10", "total_ggr_usd": 7.68}, {"month": "2023-11", "total_ggr_usd": 8.44}, {"month": "2023-12", "total_ggr_usd": 8.63}, {"month": "2024-01", "total_ggr_usd": 8.49}, {"month": "2024-02", "total_ggr_usd": 7.15}, {"month": "2024-03", "total_ggr_usd": 7.78}, {"month": "2024-04", "total_ggr_usd": 7.96}, {"month": "2024-05", "total_ggr_usd": 8.0}, {"month": "2024-06", "total_ggr_usd": 8.06}, {"month": "2024-07", "total_ggr_usd": 7.66}, {"month": "2024-08", "total_ggr_usd": 7.5}, {"month": "2024-09", "total_ggr_usd": 7.69}, {"month": "2024-10", "total_ggr_usd": 7.89}, {"month": "2024-11", "total_ggr_usd": 7.81}, {"month": "2024-12", "total_ggr_usd": 7.77}], "mau": [{"month": "2023-01", "mau": 1886}, {"month": "2023-02", "mau": 1719}, {"month": "2023-03", "mau": 1866}, {"month": "2023-04", "mau": 1805}, {"month": "2023-05", "mau": 1833}, {"month": "2023-06", "mau": 1784}, {"month": "2023-07", "mau": 1899}, {"month": "2023-08", "mau": 1853}, {"month": "2023-09", "mau": 1803}, {"month": "2023-10", "mau": 1907}, {"month": "2023-11", "mau": 1841}, {"month": "2023-12", "mau": 1831}, {"month": "2024-01", "mau": 1873}, {"month": "2024-02", "mau": 1689}, {"month": "2024-03", "mau": 1859}, {"month": "2024-04", "mau": 1796}, {"month": "2024-05", "mau": 1859}, {"month": "2024-06", "mau": 1808}, {"month": "2024-07", "mau": 1921}, {"month": "2024-08", "mau": 1848}, {"month": "2024-09", "mau": 1822}, {"month": "2024-10", "mau": 1863}, {"month": "2024-11", "mau": 1792}, {"month": "2024-12", "mau": 1865}], "churn_by_tier": [{"tier": "Enterprise", "churn_rate": 27.3, "total": 11}, {"tier": "Growth", "churn_rate": 12.0, "total": 25}, {"tier": "Starter", "churn_rate": 22.7, "total": 44}], "churn_by_country": [{"country": "CA", "churn_rate": 0.0, "total": 10}, {"country": "AU", "churn_rate": 22.2, "total": 9}, {"country": "BR", "churn_rate": 0.0, "total": 9}, {"country": "DE", "churn_rate": 22.2, "total": 9}, {"country": "GB", "churn_rate": 33.3, "total": 9}, {"country": "NG", "churn_rate": 12.5, "total": 8}, {"country": "PH", "churn_rate": 50.0, "total": 8}, {"country": "IN", "churn_rate": 16.7, "total": 6}, {"country": "KE", "churn_rate": 16.7, "total": 6}, {"country": "ZA", "churn_rate": 33.3, "total": 6}], "feature_importance": [{"feature": "total_sessions", "importance": 0.075}, {"feature": "total_transactions", "importance": 0.064}, {"feature": "payment_methods_count", "importance": 0.057}, {"feature": "first_deposit_count", "importance": 0.056}, {"feature": "tenure_months", "importance": 0.052}, {"feature": "avg_bonus_cost_pct", "importance": 0.049}, {"feature": "avg_wagered_usd", "importance": 0.048}, {"feature": "avg_session_duration", "importance": 0.047}], "cohorts": ["2022Q1", "2022Q2", "2022Q3", "2022Q4", "2023Q1", "2023Q2", "2023Q3", "2023Q4", "2024Q1", "2024Q2"], "cohort_data": [{"cohort": "2022Q1", "month": 0, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 1, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 2, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 3, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 4, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 5, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 6, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 7, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 8, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 9, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 10, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 11, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q1", "month": 12, "retention_pct": 100.0, "size": 7}, {"cohort": "2022Q2", "month": 0, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 1, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 2, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 3, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 4, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 5, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 6, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 7, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 8, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 9, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 10, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 11, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q2", "month": 12, "retention_pct": 100.0, "size": 12}, {"cohort": "2022Q3", "month": 0, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 1, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 2, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 3, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 4, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 5, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 6, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 7, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 8, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 9, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 10, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 11, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q3", "month": 12, "retention_pct": 100.0, "size": 6}, {"cohort": "2022Q4", "month": 0, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 1, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 2, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 3, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 4, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 5, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 6, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 7, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 8, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 9, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 10, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 11, "retention_pct": 100.0, "size": 8}, {"cohort": "2022Q4", "month": 12, "retention_pct": 100.0, "size": 8}, {"cohort": "2023Q1", "month": 0, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 1, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 2, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 3, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 4, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 5, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 6, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 7, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 8, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 9, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 10, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 11, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q1", "month": 12, "retention_pct": 77.8, "size": 9}, {"cohort": "2023Q2", "month": 0, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 1, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 2, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 3, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 4, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 5, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 6, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 7, "retention_pct": 100.0, "size": 11}, {"cohort": "2023Q2", "month": 8, "retention_pct": 90.9, "size": 11}, {"cohort": "2023Q2", "month": 9, "retention_pct": 90.9, "size": 11}, {"cohort": "2023Q2", "month": 10, "retention_pct": 90.9, "size": 11}, {"cohort": "2023Q2", "month": 11, "retention_pct": 90.9, "size": 11}, {"cohort": "2023Q2", "month": 12, "retention_pct": 90.9, "size": 11}, {"cohort": "2023Q3", "month": 0, "retention_pct": 100.0, "size": 9}, {"cohort": "2023Q3", "month": 1, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 2, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 3, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 4, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 5, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 6, "retention_pct": 88.9, "size": 9}, {"cohort": "2023Q3", "month": 7, "retention_pct": 77.8, "size": 9}, {"cohort": "2023Q3", "month": 8, "retention_pct": 77.8, "size": 9}, {"cohort": "2023Q3", "month": 9, "retention_pct": 77.8, "size": 9}, {"cohort": "2023Q3", "month": 10, "retention_pct": 77.8, "size": 9}, {"cohort": "2023Q3", "month": 11, "retention_pct": 66.7, "size": 9}, {"cohort": "2023Q3", "month": 12, "retention_pct": 66.7, "size": 9}, {"cohort": "2023Q4", "month": 0, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 1, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 2, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 3, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 4, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 5, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 6, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 7, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 8, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 9, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 10, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 11, "retention_pct": 100.0, "size": 7}, {"cohort": "2023Q4", "month": 12, "retention_pct": 100.0, "size": 7}, {"cohort": "2024Q1", "month": 0, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 1, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 2, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 3, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 4, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 5, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 6, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 7, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 8, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 9, "retention_pct": 100.0, "size": 3}, {"cohort": "2024Q1", "month": 10, "retention_pct": 0.0, "size": 3}, {"cohort": "2024Q1", "month": 11, "retention_pct": 0.0, "size": 3}, {"cohort": "2024Q1", "month": 12, "retention_pct": 0.0, "size": 3}, {"cohort": "2024Q2", "month": 0, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 1, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 2, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 3, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 4, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 5, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 6, "retention_pct": 87.5, "size": 8}, {"cohort": "2024Q2", "month": 7, "retention_pct": 75.0, "size": 8}, {"cohort": "2024Q2", "month": 8, "retention_pct": 25.0, "size": 8}, {"cohort": "2024Q2", "month": 9, "retention_pct": 12.5, "size": 8}, {"cohort": "2024Q2", "month": 10, "retention_pct": 0.0, "size": 8}, {"cohort": "2024Q2", "month": 11, "retention_pct": 0.0, "size": 8}, {"cohort": "2024Q2", "month": 12, "retention_pct": 0.0, "size": 8}], "risk_scores": [{"operator_id": "OP0040", "operator_name": "Brand_040", "country": "GB", "plan_tier": "Enterprise", "churned": 1, "churn_risk_score_rf": 0.741}, {"operator_id": "OP0074", "operator_name": "Brand_074", "country": "DE", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.725}, {"operator_id": "OP0048", "operator_name": "Brand_048", "country": "DE", "plan_tier": "Enterprise", "churned": 1, "churn_risk_score_rf": 0.714}, {"operator_id": "OP0018", "operator_name": "Brand_018", "country": "AU", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.69}, {"operator_id": "OP0049", "operator_name": "Brand_049", "country": "NG", "plan_tier": "Growth", "churned": 1, "churn_risk_score_rf": 0.687}, {"operator_id": "OP0008", "operator_name": "Brand_008", "country": "GB", "plan_tier": "Growth", "churned": 1, "churn_risk_score_rf": 0.651}, {"operator_id": "OP0020", "operator_name": "Brand_020", "country": "ZA", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.646}, {"operator_id": "OP0031", "operator_name": "Brand_031", "country": "GB", "plan_tier": "Growth", "churned": 1, "churn_risk_score_rf": 0.606}, {"operator_id": "OP0021", "operator_name": "Brand_021", "country": "KE", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.605}, {"operator_id": "OP0047", "operator_name": "Brand_047", "country": "IN", "plan_tier": "Enterprise", "churned": 1, "churn_risk_score_rf": 0.593}, {"operator_id": "OP0039", "operator_name": "Brand_039", "country": "PH", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.589}, {"operator_id": "OP0012", "operator_name": "Brand_012", "country": "PH", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.572}, {"operator_id": "OP0079", "operator_name": "Brand_079", "country": "KE", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.486}, {"operator_id": "OP0015", "operator_name": "Brand_015", "country": "DE", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.47}, {"operator_id": "OP0007", "operator_name": "Brand_007", "country": "PH", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.437}, {"operator_id": "OP0051", "operator_name": "Brand_051", "country": "AU", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.421}, {"operator_id": "OP0059", "operator_name": "Brand_059", "country": "ZA", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.389}, {"operator_id": "OP0001", "operator_name": "Brand_001", "country": "AU", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.382}, {"operator_id": "OP0068", "operator_name": "Brand_068", "country": "CA", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.323}, {"operator_id": "OP0010", "operator_name": "Brand_010", "country": "CA", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.306}, {"operator_id": "OP0032", "operator_name": "Brand_032", "country": "DE", "plan_tier": "Enterprise", "churned": 0, "churn_risk_score_rf": 0.305}, {"operator_id": "OP0078", "operator_name": "Brand_078", "country": "IN", "plan_tier": "Enterprise", "churned": 0, "churn_risk_score_rf": 0.302}, {"operator_id": "OP0071", "operator_name": "Brand_071", "country": "PH", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.3}, {"operator_id": "OP0057", "operator_name": "Brand_057", "country": "DE", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.292}, {"operator_id": "OP0011", "operator_name": "Brand_011", "country": "ZA", "plan_tier": "Starter", "churned": 1, "churn_risk_score_rf": 0.284}, {"operator_id": "OP0065", "operator_name": "Brand_065", "country": "KE", "plan_tier": "Starter", "churned": 0, "churn_risk_score_rf": 0.282}, {"operator_id": "OP0037", "operator_name": "Brand_037", "country": "NG", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.278}, {"operator_id": "OP0060", "operator_name": "Brand_060", "country": "GB", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.272}, {"operator_id": "OP0046", "operator_name": "Brand_046", "country": "ZA", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.26}, {"operator_id": "OP0066", "operator_name": "Brand_066", "country": "BR", "plan_tier": "Growth", "churned": 0, "churn_risk_score_rf": 0.259}]};
+
+document.getElementById('kpi-total').textContent = data.kpis.total_operators;
+document.getElementById('kpi-active').textContent = data.kpis.active;
+document.getElementById('kpi-churned').textContent = data.kpis.churned;
+document.getElementById('kpi-rate').textContent = data.kpis.churn_rate + '%';
+
+const colors = { blue:'#378ADD', teal:'#1D9E75', coral:'#D85A30', amber:'#BA7517', purple:'#7F77DD' };
+const gridColor = 'rgba(0,0,0,0.06)';
+const tickColor = '#5F5E5A';
+
+new Chart(document.getElementById('ggrChart'), {
+  type: 'line',
+  data: {
+    labels: data.ggr_trend.map(d=>d.month),
+    datasets: [{ label:'GGR ($M)', data: data.ggr_trend.map(d=>d.total_ggr_usd), borderColor: colors.blue, backgroundColor:'transparent', tension:0.3, pointRadius:2 }]
+  },
+  options: {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{display:false}, ticks:{ color:tickColor, autoSkip:true, maxRotation:45 } },
+      y:{ grid:{color:gridColor}, ticks:{ color:tickColor, callback:v=>'$'+v+'M' } }
+    }
+  }
+});
+
+new Chart(document.getElementById('mauChart'), {
+  type:'line',
+  data:{
+    labels: data.mau.map(d=>d.month),
+    datasets:[{ label:'MAU', data: data.mau.map(d=>d.mau), borderColor: colors.teal, backgroundColor:'transparent', tension:0.3, pointRadius:2 }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{ grid:{display:false}, ticks:{ color:tickColor, autoSkip:true, maxRotation:45 } },
+      y:{ grid:{color:gridColor}, ticks:{ color:tickColor } }
+    }
+  }
+});
+
+new Chart(document.getElementById('tierChart'), {
+  type:'bar',
+  data:{
+    labels: data.churn_by_tier.map(d=>d.tier),
+    datasets:[{ label:'Churn rate %', data: data.churn_by_tier.map(d=>d.churn_rate), backgroundColor: colors.coral }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{ grid:{display:false}, ticks:{ color:tickColor } },
+      y:{ grid:{color:gridColor}, ticks:{ color:tickColor, callback:v=>v+'%' }, max: 35 }
+    }
+  }
+});
+
+new Chart(document.getElementById('featChart'), {
+  type:'bar',
+  data:{
+    labels: data.feature_importance.map(d=>d.feature.replace(/_/g,' ')),
+    datasets:[{ label:'Importance', data: data.feature_importance.map(d=>d.importance), backgroundColor: colors.purple }]
+  },
+  options:{
+    indexAxis:'y',
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{ grid:{color:gridColor}, ticks:{ color:tickColor } },
+      y:{ grid:{display:false}, ticks:{ color:tickColor, font:{size:11} } }
+    }
+  }
+});
+
+new Chart(document.getElementById('countryChart'), {
+  type:'bar',
+  data:{
+    labels: data.churn_by_country.map(d=>d.country),
+    datasets:[{ label:'Churn rate %', data: data.churn_by_country.map(d=>d.churn_rate), backgroundColor: colors.amber }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{ grid:{display:false}, ticks:{ color:tickColor } },
+      y:{ grid:{color:gridColor}, ticks:{ color:tickColor, callback:v=>v+'%' }, max:55 }
+    }
+  }
+});
+
+const cohortTable = document.getElementById('cohortTable');
+const months = [0,2,4,6,8,10,12];
+let headerHtml = '<tr><th>Cohort</th>';
+months.forEach(m=> headerHtml += '<th>M'+m+'</th>');
+headerHtml += '</tr>';
+let bodyHtml = '';
+data.cohorts.forEach(c=>{
+  bodyHtml += '<tr><td>'+c+'</td>';
+  months.forEach(m=>{
+    const rec = data.cohort_data.find(d=>d.cohort===c && d.month===m);
+    const val = rec ? rec.retention_pct : null;
+    let bg = 'transparent';
+    if(val!==null){
+      const ratio = val/100;
+      const lightness = 95 - ratio*45;
+      bg = 'hsl(160, 50%, '+lightness+'%)';
+    }
+    bodyHtml += '<td style="background:'+bg+';">'+(val!==null?val+'%':'-')+'</td>';
+  });
+  bodyHtml += '</tr>';
+});
+cohortTable.innerHTML = headerHtml + bodyHtml;
+
+const riskTbody = document.getElementById('riskTbody');
+function renderRisk(filter){
+  let rows = data.risk_scores;
+  if(filter==='high') rows = rows.filter(r=>r.churn_risk_score_rf>=0.5);
+  if(filter==='churned') rows = rows.filter(r=>r.churned===1);
+  if(filter==='active') rows = rows.filter(r=>r.churned===0);
+  riskTbody.innerHTML = rows.map(r=>{
+    const pct = Math.round(r.churn_risk_score_rf*100);
+    let scoreColor = pct>=50 ? '#c0392b' : (pct>=25 ? '#b9770e' : '#666');
+    return '<tr>'+
+      '<td>'+r.operator_name+'</td>'+
+      '<td>'+r.country+'</td>'+
+      '<td>'+r.plan_tier+'</td>'+
+      '<td style="text-align:right;">'+(r.churned===1?'Churned':'Active')+'</td>'+
+      '<td style="text-align:right; color:'+scoreColor+'; font-weight:600;">'+pct+'%</td>'+
+    '</tr>';
+  }).join('');
+}
+renderRisk('all');
+document.getElementById('filterSelect').addEventListener('change', e=>renderRisk(e.target.value));
+</script>
+</body>
+</html>
